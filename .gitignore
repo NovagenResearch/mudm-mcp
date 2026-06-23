@@ -1,0 +1,18 @@
+dist/
+build/
+*.egg-info/
+**/*.egg-info/
+**/__pycache__/
+*.pyc
+.venv/
+.DS_Store
+
+# Private Claude Code context (managed as a separate subrepo)
+.claude/
+
+# Local download cache (datasets fetched from the static catalog for local analysis)
+.mudm_cache/
+data/
+
+*.png
+*.jpeg

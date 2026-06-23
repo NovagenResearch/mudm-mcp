@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mudm-mcp"
+version = "0.0.1"
+description = "Local MCP server to discover, access, and locally analyze the muDM static spatial-data catalog."
+readme = "README.md"
+authors = [{ name = "Bengt Ljungquist" }]
+license = { text = "MIT" }
+requires-python = ">=3.11,<3.14"
+keywords = ["mcp", "mudm", "spatial-data", "llm", "agents", "duckdb", "parquet"]
+dependencies = [
+    "mcp>=1.2",          # official Model Context Protocol Python SDK (stdio server)
+    "duckdb>=1.1",       # local query engine over downloaded tiles
+    "pyarrow>=16.0",     # read muDM Parquet locally; zero-copy into NumPy/Torch
+    "httpx>=0.27",       # fetch the static catalog + tiles (download / optional range reads)
+]
+
+[project.optional-dependencies]
+# muDM model awareness is OPTIONAL — the client works off the static catalog's JSON/Parquet and does not
+# require the model library. Add only if a tool needs to construct/validate MuDM features.
+model = ["mudm>=0.6.0"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+mudm-mcp = "mudm_mcp.server:main"
+
+# mudm is a co-located, actively-developed sibling (consume as an editable path dep when the `model` extra is used).
+[tool.uv.sources]
+mudm = { path = "../mudm", editable = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/"]
+pythonpath = ["src/"]
