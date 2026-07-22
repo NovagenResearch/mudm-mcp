@@ -12,10 +12,12 @@ license = { text = "MIT" }
 requires-python = ">=3.11,<3.14"
 keywords = ["mcp", "mudm", "spatial-data", "llm", "agents", "duckdb", "parquet"]
 dependencies = [
-    "mcp>=1.2",          # official Model Context Protocol Python SDK (stdio server)
-    "duckdb>=1.1",       # local query engine over downloaded tiles
-    "pyarrow>=16.0",     # read muDM Parquet locally; zero-copy into NumPy/Torch
-    "httpx>=0.27",       # fetch the static catalog + tiles (download / optional range reads)
+    "mcp>=1.2", # official Model Context Protocol Python SDK (stdio server)
+    "duckdb>=1.1", # local query engine over downloaded tiles
+    "pyarrow>=16.0", # read muDM Parquet locally; zero-copy into NumPy/Torch
+    "httpx>=0.27", # fetch the static catalog + tiles (download / optional range reads)
+    "numpy>=2.4.6",
+    "brotli>=1.2.0",
 ]
 
 [project.optional-dependencies]
