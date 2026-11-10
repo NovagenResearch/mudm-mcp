@@ -1,37 +1,47 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mudm-mcp"
-version = "0.0.1"
+version = "0.1.0"
 description = "Local MCP server to discover, access, and locally analyze the muDM static spatial-data catalog."
 readme = "README.md"
 authors = [{ name = "Bengt Ljungquist" }]
-license = { text = "MIT" }
-requires-python = ">=3.11,<3.14"
-keywords = ["mcp", "mudm", "spatial-data", "llm", "agents", "duckdb", "parquet"]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11,<3.15"
+keywords = ["mcp", "mudm", "spatial-data", "spatial-transcriptomics", "connectomics", "llm", "agents", "duckdb", "parquet"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
-    "mcp>=1.2", # official Model Context Protocol Python SDK (stdio server)
-    "duckdb>=1.1", # local query engine over downloaded tiles
+    "mcp>=2.3,<3", # official Model Context Protocol Python SDK (stdio server)
+    "duckdb>=1.4,<3", # local query engine over downloaded tiles
     "pyarrow>=16.0", # read muDM Parquet locally; zero-copy into NumPy/Torch
     "httpx>=0.27", # fetch the static catalog + tiles (download / optional range reads)
     "numpy>=2.4.6",
-    "brotli>=1.2.0",
+    "brotli>=1.2.0", # the catalog's JSON is served brotli-encoded
+    "certifi>=2024.2.2",
 ]
 
-[project.optional-dependencies]
-# muDM model awareness is OPTIONAL — the client works off the static catalog's JSON/Parquet and does not
-# require the model library. Add only if a tool needs to construct/validate MuDM features.
-model = ["mudm>=0.6.0"]
-dev = ["pytest>=8"]
+[project.urls]
+Homepage = "https://ngrf.mudm.io"
+Repository = "https://github.com/NovagenResearch/mudm-mcp"
+Issues = "https://github.com/NovagenResearch/mudm-mcp/issues"
 
 [project.scripts]
 mudm-mcp = "mudm_mcp.server:main"
 
-# mudm is a co-located, actively-developed sibling (consume as an editable path dep when the `model` extra is used).
-[tool.uv.sources]
-mudm = { path = "../mudm", editable = true }
+[dependency-groups]
+dev = ["pytest>=8"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -39,3 +49,5 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests/"]
 pythonpath = ["src/"]
+markers = ["live: needs network access to ngrf.mudm.io"]
+addopts = "-m 'not live'"

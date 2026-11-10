@@ -3,49 +3,81 @@ import json
 from pathlib import Path
 
 import pyarrow as pa
+import pytest
 import pyarrow.parquet as pq
 
 from mudm_mcp import tools
 from mudm_mcp.catalog_client import CatalogClient
 
 
-def _dl_fixture(tmp_path):
-    """A local catalog whose features.parquet has one max-zoom leaf."""
-    root = tmp_path / "site"
-    leaf = root / "tiles2d" / "demo" / "features.parquet" / "zoom=9"
-    leaf.mkdir(parents=True)
-    (leaf / "cells_part_000.mu.parquet").write_bytes(b"PARQUET-BYTES")
-    (root / "datasets" / "demo").mkdir(parents=True)
-    (root / "pyramids.json").write_text(json.dumps({"version": "1.0", "pyramids": [
-        {"id": "demo", "kind": "2d", "tilejson": "datasets/demo/tilejson.json",
-         "features": "tiles2d/demo/features.parquet/"}]}))
-    (root / "datasets" / "demo" / "tilejson.json").write_text(json.dumps({
-        "tilejson": "3.0.0", "vector_layers": [],
-        "assets": [{"role": "features", "href": "https://ex/tiles2d/demo/features.parquet/",
-                    "parts": ["zoom=8/cells_part_000.mu.parquet", "zoom=9/cells_part_000.mu.parquet"],
-                    "zooms": [8, 9], "full_res_zoom": 9}]}))
-    return root
+def _client(site, tmp_path):
+    return CatalogClient(site, cache_dir=tmp_path / "cache")
 
 
-def test_download_fetches_full_res_only(tmp_path):
-    c = CatalogClient(_dl_fixture(tmp_path), cache_dir=tmp_path / "cache")
-    r = tools.download(c, "demo")            # zoom defaults to "max" → full_res_zoom 9
-    assert r["zoom"] == 9 and r["n_files"] == 1   # only the z9 leaf (z8 exists in the manifest but is skipped)
-    out = Path(r["files"][0])
-    assert out.read_bytes() == b"PARQUET-BYTES"
-    assert out.name == "cells_part_000.mu.parquet" and "zoom=9" in str(out)
+def test_download_defaults_2d_cells_full_res(site, tmp_path):
+    r = tools.download(_client(site, tmp_path), "demo2d")
+    assert r["status"] == "ok" and r["zoom"] == 1 and r["layers"] == ["cells"]
+    assert r["n_files"] == 1 and r["n_skipped"] == 0 and "files" not in r
+    leaf = Path(r["path"]) / "zoom=1" / "cells_part_000.mu.parquet"
+    src = site / "tiles2d/demo2d/features.parquet/zoom=1/cells_part_000.mu.parquet"
+    assert leaf.read_bytes() == src.read_bytes() and r["bytes"] == src.stat().st_size
+    assert not (Path(r["path"]) / "zoom=1" / "nuclei_part_000.mu.parquet").exists()
 
 
-def test_download_parquetless_raises(tmp_path):
-    root = _dl_fixture(tmp_path)
-    # strip the features asset → simulate a 3D/mesh dataset
-    (root / "datasets" / "demo" / "tilejson.json").write_text(json.dumps({"tilejson": "3.0.0", "vector_layers": []}))
-    c = CatalogClient(root, cache_dir=tmp_path / "cache")
-    try:
-        tools.download(c, "demo")
-        assert False, "expected ValueError"
-    except ValueError as e:
-        assert "parquet-less" in str(e) or "no downloadable" in str(e)
+def test_download_explicit_layers_and_zoom(site, tmp_path):
+    r = tools.download(_client(site, tmp_path), "demo2d", zoom="max", layers=["cells", "nuclei"])
+    assert r["n_files"] == 2 and r["zoom"] == 1
+    assert tools.download(_client(site, tmp_path), "demo2d", zoom=0)["zoom"] == 0
+    assert tools.download(_client(site, tmp_path), "demo2d", zoom="0")["n_skipped"] == 1   # "0" from a JSON client
+
+
+def test_download_defaults_3d_coarse_via_viewer_descriptor(site, tmp_path):
+    r = tools.download(_client(site, tmp_path), "demo3d")      # features only in the viewer descriptor
+    assert r["status"] == "ok" and r["zoom"] == 0 and r["layers"] == [] and r["n_files"] == 1
+    assert tools.download(_client(site, tmp_path), "demo3d", zoom="max")["zoom"] == 1
+
+
+def test_download_over_cap_needs_confirmation(site, tmp_path):
+    c = _client(site, tmp_path)
+    r = tools.download(c, "demo2d", max_bytes=10)
+    assert r["status"] == "needs_confirmation" and r["est_bytes"] > 10 and r["n_files"] == 1
+    assert "confirm_large=true" in r["hint"] and "available: 0" in r["hint"]
+    assert not (tmp_path / "cache" / "demo2d").exists()        # nothing was fetched
+    assert tools.download(c, "demo2d", max_bytes=10, confirm_large=True)["status"] == "ok"
+
+
+def test_download_3d_gate_points_to_query_facets_first(site, tmp_path):
+    r = tools.download(_client(site, tmp_path), "demo3d", max_bytes=10)
+    assert r["status"] == "needs_confirmation" and r["hint"].index("query_facets") < r["hint"].index("confirm_large")
+
+
+def test_download_unknown_size_is_gated(site, tmp_path):
+    r = tools.download(_client(site, tmp_path), "big3d")       # 12,000 parts whose sizes cannot be read
+    assert r["status"] == "needs_confirmation" and r["est_bytes"] is None and r["n_files"] == 12_000
+    assert "unknown size" in r["hint"]
+
+
+def test_download_is_resumable(site, tmp_path):
+    c = _client(site, tmp_path)
+    first = tools.download(c, "demo2d")
+    again = tools.download(c, "demo2d")
+    assert again["n_skipped"] == 1 and again["bytes"] == first["bytes"]
+
+
+def test_download_rejects_unknown_zoom_and_layer(site, tmp_path):
+    c = _client(site, tmp_path)
+    with pytest.raises(ValueError, match=r"valid zooms: 0, 1"):
+        tools.download(c, "demo2d", zoom=7)
+    with pytest.raises(ValueError, match=r"valid zooms: 0, 1"):
+        tools.download(c, "demo2d", zoom="finest")
+    with pytest.raises(ValueError, match=r"available: cells, nuclei"):
+        tools.download(c, "demo2d", layers=["transcripts"])
+
+
+def test_download_without_features_raises(site, tmp_path):
+    (site / "datasets" / "big3d" / "tilejson.json").write_text(json.dumps({"tilejson": "3.0.0", "assets": []}))
+    with pytest.raises(ValueError, match="no downloadable features.parquet"):
+        tools.download(_client(site, tmp_path), "big3d")
 
 
 def _write_mudm_parquet(path: Path):
@@ -80,3 +112,16 @@ def test_query_without_download_raises(tmp_path):
         assert False, "expected FileNotFoundError"
     except FileNotFoundError as e:
         assert "download" in str(e)
+
+
+def test_query_is_capped_and_sandboxed(site, tmp_path):
+    c = _client(site, tmp_path)
+    tools.download(c, "demo2d")
+    r = tools.query(c, "demo2d", "SELECT feature_id FROM features ORDER BY 1", max_rows=2)
+    assert r["rows"] == [[1], [2]] and r["truncated"] is True
+    r = tools.query(c, "demo2d", "SELECT tags['cell_type'] AS t, count(DISTINCT feature_id) FROM features GROUP BY 1 ORDER BY 1;")
+    assert r["rows"] == [["A", 2], ["B", 2]] and r["truncated"] is False
+    with pytest.raises(ValueError, match="single SELECT"):
+        tools.query(c, "demo2d", "COPY features TO 'x.csv'")
+    with pytest.raises(Exception, match="(?i)permission|disabled"):
+        tools.query(c, "demo2d", "SELECT * FROM read_csv('/etc/hosts')")
