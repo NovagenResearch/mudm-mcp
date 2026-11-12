@@ -44,31 +44,72 @@ def _haystack(e: dict) -> str:
     return hay + " " + _COMMON_NAMES.get(str(e.get("organism") or "").lower(), "")
 
 
+MAX_SEARCH_LIMIT = 50
+_OVERVIEW_KEYS = ("kind", "technique", "organism", "tissue")
+
+
+def _overview(entries: list[dict], top: int = 12) -> dict:
+    """Value counts of the main catalog facets over ``entries`` (largest first, ``top`` per facet)."""
+    out = {}
+    for key in _OVERVIEW_KEYS:
+        counts: dict[str, int] = {}
+        for e in entries:
+            v = str(e.get(key) or "unspecified")
+            counts[v] = counts.get(v, 0) + 1
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        out["modality" if key == "kind" else key] = dict(ranked[:top])
+        if len(ranked) > top:
+            out[("modality" if key == "kind" else key)]["(other values)"] = sum(n for _, n in ranked[top:])
+    return out
+
+
 def search_datasets(client: CatalogClient, q: str = "", modality: str | None = None,
                     organism: str | None = None, technique: str | None = None, tissue: str | None = None,
-                    limit: int = 25) -> dict:
+                    limit: int = 25, offset: int = 0, sort: str = "featured") -> dict:
     """Find datasets. ``q`` is free text: every whitespace-separated word must occur (case-insensitive)
     in the id, label, summary, organism (Latin or common name), technique, tissue, condition or tags.
-    ``modality`` ("2d"/"3d"), ``organism``, ``technique``, ``tissue`` are case-insensitive substring
-    filters. Returns at most ``limit`` summaries (featured first) plus the total match ``count``."""
+    ``modality`` ("2d"/"3d"), ``organism`` (Latin or common name), ``technique``, ``tissue`` are
+    case-insensitive substring filters. Returns the total match ``count``, an ``overview`` (how the
+    matches split by modality / technique / organism / tissue) and up to ``limit`` (max 50) summaries
+    from ``offset``; ``sort`` is "featured" (default) or "size" (most features first)."""
     tokens = str(q or "").lower().split()
-    filters = {"kind": modality, "organism": organism, "technique": technique, "tissue": tissue}
+    filters = {"kind": modality, "technique": technique, "tissue": tissue}
     filters = {k: str(v).lower() for k, v in filters.items() if v not in (None, "")}
+    organism = str(organism or "").lower().strip()
+    if str(sort).lower() not in ("featured", "size"):
+        raise ValueError(f"sort must be 'featured' or 'size', got {sort!r}")
+    entries = client.entries()
     hits: list[dict] = []
-    for e in client.entries():
+    for e in entries:
         if any(v not in str(e.get(k) or "").lower() for k, v in filters.items()):
             continue
+        if organism:
+            latin = str(e.get("organism") or "").lower()
+            if organism not in latin and organism not in _COMMON_NAMES.get(latin, "").split():
+                continue
         if tokens:
             hay = _haystack(e)
             if not all(t in hay for t in tokens):
                 continue
         hits.append(e)
-    hits.sort(key=lambda e: (not e.get("featured"), str(e.get("id"))))
-    limit = max(1, min(int(limit), 100))
-    shown = [{k: e.get(k) for k in _SUMMARY_KEYS} for e in hits[:limit]]
-    out: dict[str, Any] = {"count": len(hits), "returned": len(shown), "datasets": shown}
-    if len(hits) > len(shown):
-        out["note"] = f"{len(hits) - len(shown)} more match; narrow the search or raise limit (max 100)."
+    if str(sort).lower() == "size":
+        hits.sort(key=lambda e: (-(e.get("feature_count") or 0), str(e.get("id"))))
+    else:
+        hits.sort(key=lambda e: (not e.get("featured"), str(e.get("id"))))
+    limit = max(1, min(int(limit), MAX_SEARCH_LIMIT))
+    offset = max(0, int(offset))
+    shown = [{k: e.get(k) for k in _SUMMARY_KEYS} for e in hits[offset:offset + limit]]
+    out: dict[str, Any] = {"count": len(hits), "returned": len(shown), "offset": offset, "datasets": shown}
+    if hits:
+        out["overview"] = _overview(hits)
+        rest = len(hits) - offset - len(shown)
+        if rest > 0:
+            out["note"] = (f"{rest} more match: narrow the search, or page with offset={offset + len(shown)} "
+                           f"(limit is at most {MAX_SEARCH_LIMIT}).")
+    else:
+        out["note"] = ("No dataset matches. Words in q must ALL occur and filters are substrings, so try "
+                       "fewer or simpler terms. catalog_overview shows the values that exist.")
+        out["catalog_overview"] = _overview(entries)
     return out
 
 

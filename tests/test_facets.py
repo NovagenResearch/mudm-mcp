@@ -41,7 +41,16 @@ def test_query_facets_bad_column_lists_available(site):
     with pytest.raises(ValueError, match=r"brain_regions.*Available columns: id, cell_type, pre, post"):
         query_facets(CatalogClient(site), "demo3d", "SELECT brain_regions FROM facets")
     with pytest.raises(ValueError, match="named `facets`"):
-        query_facets(CatalogClient(site), "demo3d", "SELECT * FROM properties")
+        query_facets(CatalogClient(site), "demo3d", "SELECT * FROM neurons")
+
+
+def test_query_facets_store_name_is_an_alias_of_the_view(site):
+    c = CatalogClient(site)          # what a model writes after reading describe_dataset's facet name
+    assert query_facets(c, "demo3d", "SELECT count(*) FROM properties")["rows"] == [[5]]
+    r = query_facets(c, "demo2d", "SELECT gene, sum(count) FROM expression GROUP BY 1 ORDER BY 1")
+    assert r["rows"] == [["Gad1", 10], ["Slc17a7", 17]]
+    with pytest.raises(Exception, match="(?i)single SELECT"):
+        query_facets(c, "demo3d", "DROP VIEW properties")
 
 
 def test_query_facets_store_selection(site):

@@ -8,7 +8,7 @@ from mudm_mcp.catalog_client import CatalogClient
 # --- search_datasets -------------------------------------------------------------------------------
 def test_search_without_arguments_lists_everything_featured_first(site):
     r = tools.search_datasets(CatalogClient(site))
-    assert r["count"] == 3 and r["returned"] == 3
+    assert r["count"] == 3 and r["returned"] == 3 and r["offset"] == 0
     assert [d["id"] for d in r["datasets"]] == ["demo2d", "big3d", "demo3d"]
     assert set(r["datasets"][0]) == {"id", "label", "kind", "organism", "technique", "tissue", "feature_count"}
 
@@ -33,9 +33,42 @@ def test_search_filters_are_case_insensitive_substrings(site):
     assert tools.search_datasets(c, q="demo", modality="3D")["datasets"][0]["id"] == "demo3d"
 
 
-def test_search_limit_caps_and_says_so(site):
-    r = tools.search_datasets(CatalogClient(site), limit=1)
-    assert r["count"] == 3 and r["returned"] == 1 and "2 more" in r["note"]
+def test_search_limit_caps_pages_and_says_so(site):
+    c = CatalogClient(site)
+    r = tools.search_datasets(c, limit=1)
+    assert r["count"] == 3 and r["returned"] == 1 and "2 more match" in r["note"] and "offset=1" in r["note"]
+    page2 = tools.search_datasets(c, limit=1, offset=1)
+    assert [d["id"] for d in page2["datasets"]] == ["big3d"] and page2["offset"] == 1
+    assert tools.search_datasets(c, limit=1, offset=2).get("note") is None
+    assert tools.search_datasets(c, offset=99)["returned"] == 0
+    assert tools.search_datasets(c, limit=10**6)["returned"] == 3          # clamped, not an error
+
+
+def test_search_organism_filter_accepts_common_names(site):
+    c = CatalogClient(site)          # catalog stores "Mus musculus" / "Drosophila melanogaster"
+    assert tools.search_datasets(c, organism="mouse")["count"] == 1
+    assert tools.search_datasets(c, organism="Mus")["count"] == 1
+    assert tools.search_datasets(c, organism="fly", q="connectome")["count"] == 2
+    assert tools.search_datasets(c, organism="human")["count"] == 0
+
+
+def test_search_overview_and_empty_result_help(site):
+    c = CatalogClient(site)
+    r = tools.search_datasets(c)
+    assert r["overview"]["modality"] == {"3d": 2, "2d": 1}
+    assert r["overview"]["technique"] == {"EM connectomics": 2, "Xenium": 1}
+    assert r["overview"]["organism"] == {"Drosophila melanogaster": 2, "Mus musculus": 1}
+    empty = tools.search_datasets(c, q="zebrafish retina")
+    assert empty["count"] == 0 and "fewer" in empty["note"] and "overview" not in empty
+    assert empty["catalog_overview"]["tissue"] == {"Brain / CNS": 2, "Brain": 1}
+
+
+def test_search_sort_by_size(site):
+    c = CatalogClient(site)
+    assert [d["id"] for d in tools.search_datasets(c, sort="size")["datasets"]] == ["big3d", "demo3d", "demo2d"]
+    import pytest
+    with pytest.raises(ValueError, match="sort must be"):
+        tools.search_datasets(c, sort="newest")
 
 
 # --- describe_dataset ------------------------------------------------------------------------------

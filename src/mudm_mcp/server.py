@@ -99,16 +99,23 @@ def tool(annotations: ToolAnnotations):
 
 @tool(READ_ONLY)
 def search_datasets(q: str = "", modality: str | None = None, organism: str | None = None,
-                    technique: str | None = None, tissue: str | None = None, limit: int = 25) -> dict:
-    """Find datasets in the muDM catalog. Start here.
+                    technique: str | None = None, tissue: str | None = None, limit: int = 25,
+                    offset: int = 0, sort: str = "featured") -> dict:
+    """Find datasets in the muDM catalog. Start here. Call it with no arguments for an overview of
+    everything the catalog holds.
 
-    ``q`` is free text; every word must match (case-insensitive) the id, label, summary, organism (Latin
-    or common name: mouse, human, fly), technique, tissue, condition or tags. Optional substring filters:
-    ``modality`` ("2d" spatial omics / "3d" connectomes + anatomy), ``organism``, ``technique``, ``tissue``.
-    Examples: search_datasets(q="mouse brain") · search_datasets(technique="xenium", tissue="breast") ·
-    search_datasets(modality="3d"). Returns up to ``limit`` summaries and the total match ``count``."""
+    ``q`` is free text; ALL its words must match (case-insensitive) the id, label, summary, organism,
+    technique, tissue, condition or tags, so prefer one or two words. Optional substring filters:
+    ``modality`` ("2d" spatial omics / "3d" connectomes + anatomy), ``organism`` (Latin or common name:
+    "mouse", "human", "fly"), ``technique`` ("xenium", "codex", "visium", ...), ``tissue`` ("brain", ...).
+    Examples: search_datasets(q="mouse brain") · search_datasets(organism="human", tissue="breast",
+    sort="size") · search_datasets(modality="3d").
+
+    Returns the total ``count``, an ``overview`` (how the matches split by modality, technique, organism
+    and tissue) and up to ``limit`` summaries (max 50; page with ``offset``). ``sort``: "featured" or
+    "size" (most features first; ``feature_count`` is cells for 2D data, neurons/structures for 3D)."""
     return tools.search_datasets(_get_client(), q=q, modality=modality, organism=organism,
-                                 technique=technique, tissue=tissue, limit=limit)
+                                 technique=technique, tissue=tissue, limit=limit, offset=offset, sort=sort)
 
 
 @tool(READ_ONLY)
@@ -137,7 +144,8 @@ def query_facets(dataset_id: str, sql: str, facet: str | None = None, max_rows: 
     describe_dataset → ``facets``; DESCRIBE facets also works):
     - connectomes / anatomy, ``properties`` (one row per neuron): id, cell_type, instance, pre, post, …
       SELECT cell_type, count(*) AS n FROM facets WHERE cell_type LIKE 'KC%' GROUP BY 1 ORDER BY n DESC
-    - Xenium, ``expression`` (long: cell_id, gene, count):
+      Synapse counts (pre, post) are often stored as TEXT: CAST(pre AS BIGINT) before sorting or summing.
+    - Xenium, ``expression`` (long: cell_id, gene, count; includes control probes such as BLANK_*):
       SELECT gene, sum(count) AS total FROM facets GROUP BY 1 ORDER BY total DESC LIMIT 20
     - CODEX / CosMx / MERSCOPE / MIBI, ``markers`` (wide: one row per cell, one column per marker / gene).
     The result includes the file's real ``schema``; rows are capped at ``max_rows`` (``truncated``)."""
@@ -205,7 +213,11 @@ def get_lod(dataset_id: str, zoom: int | str = "max") -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     """Console entry (`mudm-mcp`): set the catalog origin + cache, then run the stdio MCP server."""
-    ap = argparse.ArgumentParser(prog="mudm-mcp", description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(
+        prog="mudm-mcp",
+        description="Local stdio MCP server for the muDM spatial-data catalog. Started by an MCP host "
+                    "(Claude Code, Claude Desktop, Cursor, ...); it reads the static catalog and runs "
+                    "all analysis on this machine.")
     ap.add_argument("--base-url", default=os.environ.get("MUDM_BASE_URL", DEFAULT_BASE_URL),
                     help="catalog origin to read (default: %(default)s)")
     ap.add_argument("--cache-dir", default=os.environ.get("MUDM_CACHE_DIR"),

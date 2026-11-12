@@ -23,7 +23,10 @@ def client(tmp_path_factory):
 def test_catalog_is_listed_and_search_is_bounded(client):
     r = tools.search_datasets(client)
     assert r["count"] >= 100 and r["returned"] == 25 and len(json.dumps(r)) <= BUDGET
-    assert len(json.dumps(tools.search_datasets(client, limit=100))) <= 2 * BUDGET   # explicit opt-in to more
+    biggest = tools.search_datasets(client, limit=10**6)                  # the most an agent can ask for
+    assert biggest["returned"] == 50 and len(json.dumps(biggest)) <= BUDGET and "offset=50" in biggest["note"]
+    assert sum(r["overview"]["modality"].values()) == r["count"]
+    assert tools.search_datasets(client, q="breast", organism="human", sort="size")["count"] >= 5
     assert tools.search_datasets(client, q="mouse brain")["count"] >= 5
     assert tools.search_datasets(client, q="human breast")["count"] >= 5
 

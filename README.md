@@ -19,6 +19,8 @@ You need [uv](https://docs.astral.sh/uv/getting-started/installation/).
 claude mcp add mudm -- uvx mudm-mcp
 ```
 
+Start a new session and type `/mcp`: `mudm` should be listed as connected.
+
 **Claude Desktop** — add this to `claude_desktop_config.json` (Settings → Developer → Edit Config) and restart:
 
 ```json
@@ -34,12 +36,27 @@ If Claude Desktop reports that it cannot find `uvx`, give its full path instead 
 
 **Any other MCP host** — register a stdio server with the command `uvx mudm-mcp`.
 
+**From a source checkout** — no PyPI needed; use this to run an unreleased version. Clone this repository, then
+give the host the checkout's path instead of `uvx mudm-mcp`:
+
+```bash
+claude mcp add mudm -- uv run --directory /path/to/mudm-mcp mudm-mcp
+```
+
+The first launch downloads the Python dependencies (about 0.5 GB into uv's cache, a few seconds on a fast
+connection); later launches start in under a second. The first `query_facets` call also fetches DuckDB's
+`httpfs` extension (about 20 MB) from DuckDB's extension server.
+
 Then ask, for example:
 
 - *"Find a mouse brain spatial transcriptomics dataset in muDM and describe it."*
 - *"How many cells are in the 500 µm square from (2000, 2000) to (2500, 2500) of that section?"*
 - *"How many Kenyon cells are in the hemibrain connectome, by type?"*
 - *"Which genes have the most transcripts in the Xenium mouse brain coronal section?"*
+
+[`docs/demo.md`](docs/demo.md) is a ten-minute walk-through of these prompts with the answers to expect.
+
+To remove the server again: `claude mcp remove mudm` (or delete the entry from the Claude Desktop config).
 
 ## Tools
 
@@ -51,9 +68,9 @@ Then ask, for example:
 | `count_features` | Count cells inside a rectangle given in micrometres, optionally grouped by a tag (2D datasets) | a few MB, once |
 | `get_access` | URLs and a decode snippet for reading the data directly, outside this server | no |
 | `download` | Fetch one zoom level of the feature Parquet into the local cache | yes (size-gated) |
-| `query` | SQL (DuckDB) over the downloaded features | no |
-| `sample_patches` | Sample tiles as spatial patches, with per-feature geometry summaries (for ML) | no |
-| `get_lod` | Summarise one level of detail of the downloaded data | no |
+| `query` | SQL (DuckDB) over the downloaded features | no, but needs `download` first |
+| `sample_patches` | Sample tiles as spatial patches, with per-feature geometry summaries (for ML) | no, but needs `download` first |
+| `get_lod` | Summarise one level of detail of the downloaded data | no, but needs `download` first |
 
 ## Things worth knowing
 

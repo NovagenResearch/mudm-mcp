@@ -21,7 +21,8 @@ def _names(cols: list[str], cap: int = MAX_SCHEMA_COLUMNS) -> str:
 
 def query_facets(client: CatalogClient, dataset_id: str, sql: str, facet: str | None = None,
                  max_rows: int = 200) -> dict:
-    """Run ONE read-only SELECT against a dataset's facet store, exposed as the view ``facets``.
+    """Run ONE read-only SELECT against a dataset's facet store, exposed as the view ``facets`` (the
+    store's own name, e.g. ``expression`` or ``properties``, works as an alias).
 
     ``facet`` picks the store by name when a dataset has several. Returns the bounded result of
     ``run_select`` plus ``facet``, ``source`` (the file's URL) and ``schema`` — the file's REAL columns,
@@ -46,6 +47,10 @@ def query_facets(client: CatalogClient, dataset_id: str, sql: str, facet: str | 
 
     con = open_sandbox("facets", store["url"])
     try:
+        # Agents often write FROM <store name> (e.g. FROM expression) because that is the name
+        # describe_dataset shows: accept it as an alias of the `facets` view instead of failing.
+        if store["name"].isidentifier() and store["name"].lower() != "facets":
+            con.execute(f'CREATE VIEW "{store["name"]}" AS SELECT * FROM facets')
         schema = [{"name": r[0], "type": r[1]} for r in con.execute("DESCRIBE facets").fetchall()]
         cols = [c["name"] for c in schema]
         try:
